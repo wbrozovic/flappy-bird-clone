@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flappy Bird Enhanced</title>
+  <style>
+    html,
+    body {
+    
+      margin: 0;
+      padding: 0;
+      background: rgb(0	126	136);
+      font-family: sans-serif;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.8);
+      font-size: 24px;
+      text-align: center;
+      visibility: hidden;
+      z-index: 10;
+    }
+
+    canvas {
+      display: block;
+      margin: 0 auto;
+      background: skyblue;
+      width: 400px;
+      height: 100vh;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="overlay">
+    <img id="gameOverImg" src="./sprites/gameover.png" style="margin-bottom:20px;" />
+    <p>Press SPACE to play again</p>
+  </div>
+  <canvas id="game" width="288" height="512"></canvas>
+  <script>
+    (function () {
+      let flightData = [];
+      let flightStartTime = null;
+      const canvas = document.getElementById('game');
+      const ctx = canvas.getContext('2d');
+      const overlay = document.getElementById('overlay');
+      const debug = false;
+      const sprites = {
+        bgDay: "./sprites/background-day.png",
+        bgNight: "./sprites/background-night.png",
+        base: "./sprites/base.png",
+        birdFrames: [
+          "./sprites/yellowbird-upflap.png",
+          "./sprites/yellowbird-midflap.png",
+          "./sprites/yellowbird-downflap.png",
+        ],
+        pipeGreen: "./sprites/pipe-green.png",
+        pipeRed: "./sprites/pipe-red.png",
+        digits: [
+          "./sprites/0.png",
+          "./sprites/1.png",
+          "./sprites/2.png",
+          "./sprites/3.png",
+          "./sprites/4.png",
+          "./sprites/5.png",
+          "./sprites/6.png",
+          "./sprites/7.png",
+          "./sprites/8.png",
+          "./sprites/9.png"
+        ],
+        message: "./sprites/message.png"
+      };
+
+      let images = {};
+      let loadCount = 0;
+      let totalToLoad = 1 + 1 + 3 + 2 + 10 + 1; // 1 bg + 1 base + 3 bird + 2 pipe + 10 digits + 1 message = 18
+      // Actually load both bg and pipe variants
+      images.bg = new Image();
+      images.base = new Image();
+      images.bird = [];
+      images.pipe = [];
+      images.digits = [];
+      images.message = new Image();
+
+      function imgLoaded() { 
+        if (++loadCount >= totalToLoad) {
+
+          init(); 
+        } else {
+          console.log('Loaded ' + loadCount + ' of ' + totalToLoad);
+        }
+      }
+
+      // Randomize day/night
+      const useNight = Math.random() < 0.5;
+      images.bg.src = useNight ? sprites.bgNight : sprites.bgDay; images.bg.onload = imgLoaded;
+      images.base.src = sprites.base; images.base.onload = imgLoaded;
+      
+      for (let i = 0; i < sprites.birdFrames.length; i++) {
+        let img = new Image();
+        img.src = sprites.birdFrames[i];
+        img.onload = imgLoaded;
+        images.bird.push(img);
+      }
+
+      // Random pipe color each run
+      const useRedPipe = Math.random() < 0.5;
+      let pipeSrc = useRedPipe ? sprites.pipeRed : sprites.pipeGreen;
+      for (let i = 0; i < 2; i++) {
+        let p = new Image();
+        p.src = pipeSrc;
+        p.onload = imgLoaded;
+        images.pipe.push(p);
+      }
+
+      for (let i = 0; i < sprites.digits.length; i++) {
+        let d = new Image();
+        d.src = sprites.digits[i];
+        d.onload = imgLoaded;
+        images.digits[i] = d;
+      }
+
+      images.message.src = sprites.message; images.message.onload = imgLoaded;
+
+      let frames = 0, score = 0, highScore = parseInt(localStorage.getItem('highScore') || 0);
+      let gameOver = false;
+      const gravity = 0.25, jump = -4.6;
+      let bird = { x: 50, y: 256, w: 34, h: 24, vy: 0, frame: 0 };
+      let pipes = [];
+      const pipeGap = 110, pipeWidth = 52;
+      let bgX = 0, bgScrollSpeed = 0.5;
+      let groundX = 0, groundScrollSpeed = 2;
+
+      function init() {
+        reset();
+        draw();
+        loop();
+      }
+
+      function reset() {
+        gameOver = false; score = 0; frames = 0;
+        bird.x = 50; bird.y = canvas.height / 2; bird.vy = 0; bird.frame = 0;
+        pipes = [];
+        overlay.style.visibility = 'hidden';
+
+        // Start a new flight record
+        flightStartTime = Date.now();
+        flightData = []; 
+      }
+
+      function spawnPipe() {
+        let topH = 30 + Math.random() * (canvas.height - pipeGap - 110);
+        pipes.push({ x: canvas.width, topY: topH, bottomY: topH + pipeGap, passed: false });
+      }
+
+      function update() {
+        if (!gameOver) {
+          frames++;
+          bird.vy += gravity;
+          bird.y += bird.vy;
+
+          // Record current frame and bird.y
+          flightData.push([frames, bird.y]);
+
+          if (frames % 100 === 0) spawnPipe();
+          // Animate bird
+          if (frames % 10 === 0) bird.frame = (bird.frame + 1) % 3;
+
+          bgX -= bgScrollSpeed; if (bgX <= -images.bg.width) bgX = 0;
+          groundX -= groundScrollSpeed; if (groundX <= -images.base.width) groundX = 0;
+
+          for (let i = 0; i < pipes.length; i++) {
+            pipes[i].x -= 2;
+            if (pipes[i].x + pipeWidth < bird.x && !pipes[i].passed) {
+              pipes[i].passed = true;
+              score++;
+              if (score > highScore) { highScore = score; localStorage.setItem('highScore', highScore); }
+            }
+            if (collision(bird, pipes[i])) endGame();
+          }
+          pipes = pipes.filter(p => p.x + pipeWidth > 0);
+          if (bird.y + bird.h > canvas.height - images.base.height || bird.y < 0) endGame();
+        }
+      }
+
+      function collision(b, p) {
+        // const inX = bird.x + bird.w > p.x && bird.x < p.x + pipeWidth;
+        // const hitTop = bird.y < p.topY;
+        // const hitBot = bird.y + bird.h > p.bottomY;
+        // return inX && (hitTop || hitBot);
+        const birdLeft = b.x + 2.5;
+        const birdRight = b.x + b.w - 2.5;
+        const birdTop = b.y + 2.5;
+        const birdBottom = b.y + b.h - 2.5;
+
+        const pipeLeft = p.x;
+        const pipeRight = p.x + pipeWidth;
+        const pipeTopEnd = p.topY;
+        const pipeBottomStart = p.bottomY;
+
+        const hitsTopPipe = birdRight > pipeLeft && birdLeft < pipeRight && birdTop < pipeTopEnd;
+        const hitsBottomPipe = birdRight > pipeLeft && birdLeft < pipeRight && birdBottom > pipeBottomStart;
+
+        return hitsTopPipe || hitsBottomPipe;
+      }
+
+      function endGame() {
+        gameOver = true;
+        overlay.style.visibility = 'visible';
+
+        // Convert flightData to CSV
+        // Format: "frame,y"
+        let csvContent = "frame,y\n" + flightData.map(row => row.join(",")).join("\n");
+
+        // Store in localStorage
+        const flightKey = "flight_" + flightStartTime;
+        localStorage.setItem(flightKey, csvContent);
+      }
+
+      function drawScore() {
+        const sStr = score.toString();
+        let totalWidth = 0;
+        for (let i = 0; i < sStr.length; i++) {
+          totalWidth += images.digits[parseInt(sStr[i])].width;
+        }
+        let x = (canvas.width - totalWidth) / 2;
+        for (let i = 0; i < sStr.length; i++) {
+          let d = images.digits[parseInt(sStr[i])];
+          ctx.drawImage(d, x, 50);
+          x += d.width;
+        }
+      }
+
+      function drawHighScore() {
+        const hsStr = highScore.toString();
+        let totalWidth = 0;
+        for (let i = 0; i < hsStr.length; i++) {
+          totalWidth += images.digits[parseInt(hsStr[i])].width;
+        }
+        let x = 0;// (canvas.width - totalWidth) / 2;
+        for (let i = 0; i < hsStr.length; i++) {
+          let d = images.digits[parseInt(hsStr[i])];
+          // Draw high score below current score
+          ctx.drawImage(d, x, 0);
+          x += d.width;
+        }
+      }
+
+      function drawBoundingBoxes() {
+        // Draw bounding box for bird
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 1;
+        const birdLeft = bird.x + 5;
+        const birdRight = bird.x + bird.w - 5;
+        const birdTop = bird.y + 5;
+        const birdBottom = bird.y + bird.h - 5;
+        ctx.strokeRect(birdLeft, birdTop, (birdRight - birdLeft), (birdBottom - birdTop));
+
+        // Draw bounding boxes for pipes
+        ctx.strokeStyle = 'blue';
+        for (let i = 0; i < pipes.length; i++) {
+          const p = pipes[i];
+          const pipeLeft = p.x;
+          const pipeRight = p.x + 52; // pipeWidth = 52
+          // Top pipe box from top of canvas down to p.topY
+          ctx.strokeRect(pipeLeft, 0, pipeRight - pipeLeft, p.topY);
+          // Bottom pipe box from p.bottomY down to bottom of canvas
+          ctx.strokeRect(pipeLeft, p.bottomY, pipeRight - pipeLeft, canvas.height - p.bottomY);
+        }
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // BG
+        // Update background position
+        bgX -= bgScrollSpeed;
+        if (bgX <= -images.bg.width) {
+          bgX = 0;
+        }
+
+        // Drawing the background twice ensures seamless looping
+        ctx.drawImage(images.bg, bgX, canvas.height - images.bg.height);
+        ctx.drawImage(images.bg, bgX + images.bg.width, canvas.height - images.bg.height);
+        // ctx.drawImage(images.bg, bgX, canvas.height - images.bg.height);
+        // ctx.drawImage(images.bg, bgX + images.bg.width, canvas.height - images.bg.height);
+
+        // Pipes
+        for (let i = 0; i < pipes.length; i++) {
+          drawPipe(pipes[i].x, pipes[i].topY - images.pipe[0].height, true);
+          drawPipe(pipes[i].x, pipes[i].bottomY, false);
+        }
+
+        // Ground
+        ctx.drawImage(images.base, groundX, canvas.height - images.base.height);
+        ctx.drawImage(images.base, groundX + images.base.width, canvas.height - images.base.height);
+
+        // Bird
+        ctx.drawImage(images.bird[bird.frame], bird.x, bird.y);
+
+        // Score
+        drawScore();
+        drawHighScore();
+
+        if (debug) {
+          drawBoundingBoxes();
+        }
+        
+        requestAnimationFrame(draw);
+      }
+
+      function drawPipe(x, y, flipped) {
+        ctx.save();
+        if (flipped) {
+          ctx.translate(x + pipeWidth / 2, y + images.pipe[0].height / 2);
+          ctx.rotate(Math.PI);
+          ctx.drawImage(images.pipe[0], -pipeWidth / 2, -images.pipe[0].height / 2);
+        } else {
+          ctx.drawImage(images.pipe[0], x, y);
+        }
+        ctx.restore();
+      }
+
+      document.addEventListener('keydown', e => {
+        if (e.code === 'Space') {
+          if (gameOver) reset();
+          else bird.vy = jump;
+        }
+      });
+
+      function loop() {
+        update();
+        setTimeout(loop, 16);
+      }
+    })();
+  </script>
+</body>
+
+</html>
