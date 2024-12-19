@@ -41,6 +41,19 @@
       width: 400px;
       height: 100vh;
     }
+
+    #exportBtn {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      z-index: 20;
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
   </style>
 </head>
 
@@ -49,7 +62,11 @@
     <img id="gameOverImg" src="./sprites/gameover.png" style="margin-bottom:20px;" />
     <p>Press SPACE to play again</p>
   </div>
+  <button id="exportBtn">Export All Flight Data</button>
   <canvas id="game" width="288" height="512"></canvas>
+
+  <!-- Include JSZip to export flight data -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script>
     (function () {
       let flightData = [];
@@ -344,6 +361,40 @@
         update();
         setTimeout(loop, 16);
       }
+
+      // Export button logic
+      exportBtn.addEventListener('click', async () => {
+        // Create a new JSZip instance
+        const zip = new JSZip();
+
+        let foundData = false;
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key.startsWith("flight_")) {
+            foundData = true;
+            const csv = localStorage.getItem(key);
+            // Add this CSV to the zip as key.csv
+            // Use the flight key as the filename for uniqueness
+            zip.file(`${key}.csv`, csv);
+          }
+        }
+
+        if (!foundData) {
+          alert("No flight data found.");
+          return;
+        }
+
+        // Generate the zip file
+        const content = await zip.generateAsync({ type: "blob" });
+        const url = URL.createObjectURL(content);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "all_flights.zip";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      });
     })();
   </script>
 </body>
